@@ -60,20 +60,6 @@ def _cargar(fetch_fn, nombre: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# ─── Filtros (sidebar) ──────────────────────────────────────────────────────
-
-with st.sidebar:
-    st.header("🔍 Filtros")
-    moneda = st.radio("Moneda", ["Pesos ($)", "Dólares (US$)"], index=0)
-    busqueda = st.text_input("Buscar categoría", placeholder="ej. novillo, ternero...")
-    orden_por = st.selectbox("Ordenar por", ["Precio", "Variación", "Cantidad operada"])
-    orden_desc = st.toggle("Orden descendente", value=True)
-    st.divider()
-    st.caption("Los precios se refrescan solos cada 30 min, o tocá **Actualizar ahora**.")
-
-usar_usd = moneda.startswith("Dólares")
-
-
 def tendencia(v) -> str:
     if pd.isna(v):
         return "Sin dato"
@@ -84,40 +70,69 @@ def tendencia(v) -> str:
     return "Estable"
 
 
-def filtrar_y_ordenar(df: pd.DataFrame, precio_col: str) -> pd.DataFrame:
+def filtrar_y_ordenar(df: pd.DataFrame, precio_col: str, variacion_col: str = "variacion") -> pd.DataFrame:
     if df.empty:
         return df
     d = df.copy()
     if busqueda:
         d = d[d["categoria"].str.contains(busqueda, case=False, na=False)]
-    sort_col = {"Precio": precio_col, "Variación": "variacion", "Cantidad operada": "cantidad"}[orden_por]
+    sort_col = {"Precio": precio_col, "Variación": variacion_col, "Cantidad operada": "cantidad"}[orden_por]
     if sort_col in d.columns:
         d = d.sort_values(sort_col, ascending=not orden_desc, na_position="last")
     return d
 
 
-def kpis(d: pd.DataFrame, precio_col: str, moneda_signo: str):
-    if d.empty:
-        return
-    cols = st.columns(4) if "variacion" in d.columns and d["variacion"].notna().any() else st.columns(2)
-    with cols[0]:
-        with st.container(border=True):
-            st.metric("Categorías", len(d))
-    with cols[1]:
-        with st.container(border=True):
-            st.metric("Precio promedio", f"{moneda_signo}{d[precio_col].mean():,.0f}")
-    if len(cols) == 4:
-        top_sube = d.loc[d["variacion"].idxmax()]
-        top_baja = d.loc[d["variacion"].idxmin()]
-        with cols[2]:
-            with st.container(border=True):
-                st.metric("Mayor suba", top_sube["categoria"], delta=f"{top_sube['variacion']:+.0f}")
-        with cols[3]:
-            with st.container(border=True):
-                st.metric("Mayor baja", top_baja["categoria"], delta=f"{top_baja['variacion']:+.0f}")
+def construir_catalogo(*fuentes_con_label) -> pd.DataFrame:
+    """Une inv/can/mag en un solo catálogo con una etiqueta de fuente legible,
+    para poder buscar cualquier categoría sin importar de dónde viene."""
+    partes = []
+    for df, label in fuentes_con_label:
+        if df.empty:
+            continue
+        t = df.copy()
+        t["fuente_label"] = label
+        partes.append(t)
+    if not partes:
+        return pd.DataFrame()
+    cat = pd.concat(partes, ignore_index=True, sort=False)
+    cat["clave"] = cat["categoria"] + " · " + cat["fuente_label"]
+    return cat
 
 
-def grafico_barras(d: pd.DataFrame, precio_col: str, titulo_x: str, color_col: str = None, color_map: dict = None):
+def tarjeta_favorito(col, fila: pd.Series, signo: str, usar_usd: bool, decimales: int):
+    precio_col = "precio_usd" if usar_usd else "precio"
+    precio_anterior_col = "precio_anterior_usd" if usar_usd else "precio_anterior"
+    variacion_col = "variacion_usd" if usar_usd else "variacion"
+    precio_val = fila.get(precio_col)
+    unidad = fila.get("unidad")
+    unidad = unidad if pd.notna(unidad) else "Kg"
+    with col, st.container(border=True):
+        st.caption(fila["fuente_label"])
+        st.markdown(f"**{fila['categoria']}**")
+        if pd.isna(precio_val):
+            st.write(f"Sin dato en {signo}" if usar_usd else "Sin dato")
+            return
+        st.metric(f"{signo}/{unidad}", f"{signo} {precio_val:,.{decimales}f}")
+
+        delta = fila.get(variacion_col)
+        precio_anterior = fila.get(precio_anterior_col)
+        if pd.notna(delta):
+            texto_delta = f"{signo}{delta:+,.{decimales}f}"
+            if pd.notna(precio_anterior) and precio_anterior:
+                texto_delta += f" ({delta / precio_anterior * 100:+.1f}%)"
+            color = VERDE_SUBE if delta > 0 else (ROJO_BAJA if delta < 0 else GRIS_IGUAL)
+            flecha = "▲" if delta > 0 else ("▼" if delta < 0 else "▬")
+            st.markdown(f":{('green' if delta > 0 else 'red' if delta < 0 else 'gray')}[{flecha} {texto_delta}]")
+        periodo = fila.get("periodo_comparacion")
+        if pd.notna(periodo):
+            st.caption(f"vs. semana del {periodo}")
+
+        cantidad = fila.get("cantidad")
+        if pd.notna(cantidad):
+            st.caption(f"{int(cantidad):,} cabezas operadas")
+
+
+def grafico_barras(d: pd.DataFrame, precio_col: str, titulo_x: str, color_col: str = None, color_map: dict = None, decimales: int = 0):
     if d.empty:
         st.info("Sin datos para mostrar con estos filtros.")
         return
@@ -127,7 +142,7 @@ def grafico_barras(d: pd.DataFrame, precio_col: str, titulo_x: str, color_col: s
         color=color_col, color_discrete_map=color_map,
         text=precio_col, template="plotly_white",
     )
-    fig.update_traces(texttemplate="%{text:,.0f}", textposition="outside", cliponaxis=False)
+    fig.update_traces(texttemplate=f"%{{text:,.{decimales}f}}", textposition="outside", cliponaxis=False)
     fig.update_layout(
         showlegend=bool(color_col), height=max(320, 34 * len(d)),
         margin=dict(l=10, r=10, t=30, b=10),
@@ -137,13 +152,22 @@ def grafico_barras(d: pd.DataFrame, precio_col: str, titulo_x: str, color_col: s
     st.plotly_chart(fig, use_container_width=True)
 
 
-def tabla_estilizada(d: pd.DataFrame, columnas: dict, var_col_original: str = None):
+def tabla_estilizada(d: pd.DataFrame, columnas: dict, var_col_original: str = None, precio_col_original: str = None, decimales: int = 0):
     if d.empty:
         return
     g = d[list(columnas.keys())].rename(columns=columnas)
     num_cols = g.select_dtypes(include="number").columns
     col_renombrada = columnas.get(var_col_original)
-    formatos = {c: ("{:+,.0f}" if c == col_renombrada else "{:,.0f}") for c in num_cols}
+    col_precio_renombrada = columnas.get(precio_col_original)
+
+    def fmt(c):
+        if c == col_renombrada:
+            return "{:+,.%df}" % decimales
+        if c == col_precio_renombrada:
+            return "{:,.%df}" % decimales
+        return "{:,.0f}"
+
+    formatos = {c: fmt(c) for c in num_cols}
     styler = g.style.format(formatos, na_rep="—")
     if var_col_original and var_col_original in columnas:
 
@@ -168,7 +192,50 @@ inv = _cargar(_invernada, "deCampoaCampo Invernada")
 can = _cargar(_faena_canuelas, "deCampoaCampo Cañuelas")
 mag = _cargar(_faena_mag, "Mercado Agroganadero")
 
+catalogo = construir_catalogo(
+    (inv, "Invernada"), (can, "Faena Cañuelas"), (mag, "Faena Mercado Agroganadero"),
+)
+
+FAVORITOS_DEFAULT = [
+    "Terneros 160-180 Kg. · Invernada",
+    "Novillitos hasta 390 Kg. · Faena Cañuelas",
+    "Vaquillonas hasta 390 Kg. · Faena Cañuelas",
+    "Vacas Buenas · Faena Cañuelas",
+]
+
+# ─── Filtros (sidebar) ──────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.header("⭐ Tus categorías")
+    opciones_favoritos = sorted(catalogo["clave"].unique()) if not catalogo.empty else []
+    favoritos_sel = st.multiselect(
+        "Elegí las que querés ver siempre arriba de todo",
+        opciones_favoritos,
+        default=[f for f in FAVORITOS_DEFAULT if f in opciones_favoritos],
+    )
+    st.divider()
+    st.header("🔍 Explorar todo")
+    moneda = st.radio("Moneda", ["Pesos ($)", "Dólares (US$)"], index=0)
+    busqueda = st.text_input("Buscar categoría", placeholder="ej. novillo, ternero...")
+    orden_por = st.selectbox("Ordenar por", ["Precio", "Variación", "Cantidad operada"])
+    orden_desc = st.toggle("Orden descendente", value=True)
+    st.divider()
+    st.caption("Los precios se refrescan solos cada 30 min, o tocá **Actualizar ahora**.")
+
+usar_usd = moneda.startswith("Dólares")
 signo = "US$" if usar_usd else "$"
+decimales = 2 if usar_usd else 0
+col_variacion = "variacion_usd" if usar_usd else "variacion"
+
+# ─── Tus precios (favoritos) ────────────────────────────────────────────────
+
+if favoritos_sel:
+    st.subheader("🎯 Tus precios")
+    cols = st.columns(len(favoritos_sel))
+    for col, clave in zip(cols, favoritos_sel):
+        fila = catalogo[catalogo["clave"] == clave].iloc[0]
+        tarjeta_favorito(col, fila, signo, usar_usd, decimales)
+    st.divider()
 
 tab_inv, tab_faena = st.tabs(["🐄 Invernada", "🥩 Faena"])
 
@@ -182,8 +249,8 @@ with tab_inv:
                                      default=["Machos", "Hembras", "Vientres"])
         precio_col = "precio_usd" if usar_usd else "precio"
         d = inv[inv["grupo"].isin(grupos_sel)]
-        d = filtrar_y_ordenar(d, precio_col)
-        d = d.assign(Tendencia=d["variacion"].apply(tendencia))
+        d = filtrar_y_ordenar(d, precio_col, col_variacion)
+        d = d.assign(Tendencia=d[col_variacion].apply(tendencia))
 
         # "Vientres" se cotiza por bulto/cabeza, no por Kg — no se puede mezclar
         # en el mismo gráfico/escala que el resto sin distorsionar los valores.
@@ -192,15 +259,14 @@ with tab_inv:
             if d_u.empty:
                 continue
             st.markdown(f"##### Precios {etiqueta}")
-            kpis(d_u, precio_col, signo)
-            grafico_barras(d_u, precio_col, f"Precio ({signo}/{unidad})", color_col="Tendencia", color_map=COLOR_TENDENCIA)
+            grafico_barras(d_u, precio_col, f"Precio ({signo}/{unidad})", color_col="Tendencia", color_map=COLOR_TENDENCIA, decimales=decimales)
             with st.expander(f"Ver tabla completa — {etiqueta}"):
                 cols = {
                     "categoria": "Categoría", "grupo": "Grupo",
-                    precio_col: f"Precio ({signo}/{unidad})", "variacion": "Var. semanal",
+                    precio_col: f"Precio ({signo}/{unidad})", col_variacion: "Var. semanal",
                     "cantidad": "Cabezas operadas",
                 }
-                tabla_estilizada(d_u, cols, var_col_original="variacion")
+                tabla_estilizada(d_u, cols, var_col_original=col_variacion, precio_col_original=precio_col, decimales=decimales)
 
 # ─── Faena ─────────────────────────────────────────────────────────────────
 
@@ -210,17 +276,16 @@ with tab_faena:
         st.info("Sin datos de Cañuelas disponibles.")
     else:
         precio_col = "precio_usd" if usar_usd else "precio"
-        d = filtrar_y_ordenar(can, precio_col)
-        d = d.assign(Tendencia=d["variacion"].apply(tendencia))
+        d = filtrar_y_ordenar(can, precio_col, col_variacion)
+        d = d.assign(Tendencia=d[col_variacion].apply(tendencia))
 
-        kpis(d, precio_col, signo)
-        grafico_barras(d, precio_col, f"Precio ({signo}/Kg + IVA)", color_col="Tendencia", color_map=COLOR_TENDENCIA)
+        grafico_barras(d, precio_col, f"Precio ({signo}/Kg + IVA)", color_col="Tendencia", color_map=COLOR_TENDENCIA, decimales=decimales)
         with st.expander("Ver tabla completa"):
             cols = {
                 "categoria": "Categoría", precio_col: f"Precio ({signo}/Kg)",
-                "variacion": "Var. vs. semana ant.", "cantidad": "Cabezas operadas",
+                col_variacion: "Var. vs. semana ant.", "cantidad": "Cabezas operadas",
             }
-            tabla_estilizada(d, cols, var_col_original="variacion")
+            tabla_estilizada(d, cols, var_col_original=col_variacion, precio_col_original=precio_col, decimales=decimales)
 
     st.subheader("Mercado Agroganadero")
     if mag.empty:
@@ -232,14 +297,6 @@ with tab_faena:
         d["Grupo"] = d["categoria"].str.split().str[0].str.title()
         sort_col = {"Precio": "precio", "Variación": "precio", "Cantidad operada": "cantidad"}[orden_por]
         d = d.sort_values(sort_col, ascending=not orden_desc)
-
-        c1, c2, c3 = st.columns(3)
-        with c1, st.container(border=True):
-            st.metric("Categorías", len(d))
-        with c2, st.container(border=True):
-            st.metric("Precio promedio", f"${d['precio'].mean():,.0f}")
-        with c3, st.container(border=True):
-            st.metric("Cabezas totales", f"{int(d['cantidad'].sum()):,}")
 
         grafico_barras(d, "precio", "Precio promedio ($/Kg + IVA)", color_col="Grupo")
         with st.expander("Ver tabla completa"):

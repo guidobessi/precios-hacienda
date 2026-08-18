@@ -51,6 +51,7 @@ def _dd_mm_to_date(dd_mm: str, hoy: Optional[date] = None) -> date:
 
 def _parse_invernada_json(data: dict, grupo: str, hoy: Optional[date] = None) -> list[dict]:
     fecha_dato = _dd_mm_to_date(data["semana_actual"]["hasta"], hoy)
+    periodo_comparacion = f"{data['semana_pasada']['desde']} al {data['semana_pasada']['hasta']}"
     # deCampoaCampo vende "Vientres" (vacas/vaquillonas preñadas o con cría)
     # por bulto/cabeza, no por Kg — no se puede comparar en la misma escala
     # que el resto de las categorías de invernada.
@@ -66,9 +67,12 @@ def _parse_invernada_json(data: dict, grupo: str, hoy: Optional[date] = None) ->
             "precio": float(item["precio_semana_1"]),
             "precio_usd": item.get("precio_semana_1_usd"),
             "precio_anterior": float(item["precio_semana_2"]),
+            "precio_anterior_usd": item.get("precio_semana_2_usd"),
             "variacion": item.get("variacion_precio_semana_1"),
+            "variacion_usd": item.get("variacion_precio_semana_1_usd"),
             "cantidad": item.get("cantidad_semana_1"),
             "fecha_dato": fecha_dato,
+            "periodo_comparacion": periodo_comparacion,
         })
     return rows
 
@@ -90,6 +94,7 @@ def fetch_invernada() -> list[dict]:
 
 def _parse_gordo_json(data: dict) -> list[dict]:
     fecha_dato = datetime.strptime(data["hoy"], "%d/%m/%Y").date()
+    periodo_comparacion = f"{data['semana_pasada']['desde']} al {data['semana_pasada']['hasta']}"
     rows = []
     for item in data["data"]:
         rows.append({
@@ -100,9 +105,12 @@ def _parse_gordo_json(data: dict) -> list[dict]:
             "precio": float(item["precio_semana_1"]),
             "precio_usd": item.get("precio_semana_1_usd"),
             "precio_anterior": float(item["precio_semana_2"]),
+            "precio_anterior_usd": item.get("precio_semana_2_usd"),
             "variacion": item.get("variacion_precio_semana_1"),
+            "variacion_usd": item.get("variacion_precio_semana_1_usd"),
             "cantidad": item.get("cantidad_semana_1"),
             "fecha_dato": fecha_dato,
+            "periodo_comparacion": periodo_comparacion,
         })
     return rows
 
