@@ -51,12 +51,17 @@ def _dd_mm_to_date(dd_mm: str, hoy: Optional[date] = None) -> date:
 
 def _parse_invernada_json(data: dict, grupo: str, hoy: Optional[date] = None) -> list[dict]:
     fecha_dato = _dd_mm_to_date(data["semana_actual"]["hasta"], hoy)
+    # deCampoaCampo vende "Vientres" (vacas/vaquillonas preñadas o con cría)
+    # por bulto/cabeza, no por Kg — no se puede comparar en la misma escala
+    # que el resto de las categorías de invernada.
+    unidad = "Bulto" if grupo == "Vientres" else "Kg"
     rows = []
     for item in data["data"]:
         rows.append({
             "fuente": "decampoacampo_invernada",
             "tipo": "invernada",
             "grupo": grupo,
+            "unidad": unidad,
             "categoria": item["categoria"],
             "precio": float(item["precio_semana_1"]),
             "precio_usd": item.get("precio_semana_1_usd"),
