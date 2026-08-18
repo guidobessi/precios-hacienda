@@ -6,6 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 from precios_hacienda import fetch_invernada, fetch_faena_canuelas, fetch_faena_mag
+from comparador_ofertas import Oferta, normalizar_oferta
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -236,6 +237,114 @@ if favoritos_sel:
         fila = catalogo[catalogo["clave"] == clave].iloc[0]
         tarjeta_favorito(col, fila, signo, usar_usd, decimales)
     st.divider()
+
+# ─── Comparador de ofertas ──────────────────────────────────────────────────
+
+st.subheader("🧮 Comparador de ofertas")
+st.caption(
+    "Cargá las ofertas de cada comprador, aunque vengan en formatos distintos "
+    "(precio final o en gancho, con o sin IVA, con o sin comisión, a distinto plazo de pago) "
+    "y te decimos cuál conviene aceptar en igualdad de condiciones."
+)
+
+if "ofertas" not in st.session_state:
+    st.session_state["ofertas"] = []
+
+with st.form("form_oferta", clear_on_submit=True):
+    c1, c2 = st.columns(2)
+    comprador = c1.text_input("Comprador")
+    tipo_precio = c2.radio("Tipo de precio", ["Precio final (en pie)", "Precio en gancho (media res)"], horizontal=True)
+    es_gancho = tipo_precio.startswith("Precio en gancho")
+
+    c3, c4 = st.columns(2)
+    precio_base = c3.number_input("Precio informado ($/Kg)", min_value=0.0, step=10.0, format="%.2f")
+    rinde_pct = c4.number_input(
+        "Rinde de la media res (%)", min_value=40.0, max_value=65.0, value=56.0, step=0.5,
+        help="Sólo se usa si elegiste 'Precio en gancho' — convierte a $/Kg en pie.",
+    )
+
+    c5, c6 = st.columns(2)
+    incluye_iva = c5.radio("¿El precio ya incluye IVA?", ["No, hay que sumarlo", "Sí, ya incluido"], horizontal=True) == "Sí, ya incluido"
+    iva_pct = c6.number_input("IVA (%)", min_value=0.0, value=10.5, step=0.5, help="Sólo se usa si el precio no incluye IVA.")
+
+    c7, c8 = st.columns(2)
+    tiene_comision = c7.checkbox("Tiene comisión")
+    comision_pct = c8.number_input("Comisión (%)", min_value=0.0, value=3.0, step=0.5, help="Sólo se usa si tildaste 'Tiene comisión'.")
+
+    c9, c10, c11 = st.columns(3)
+    plazo_dias = c9.number_input("Plazo de pago (días)", min_value=0, value=0, step=5)
+    tasa_mensual_pct = c10.number_input(
+        "Tasa mensual esperada (%)", min_value=0.0, value=3.0, step=0.5,
+        help="Costo de oportunidad / inflación mensual que asumís. Se usa para descontar a valor "
+             "presente las ofertas con plazo de pago mayor a contado — no afecta si el plazo es 0.",
+    )
+    peso_total_kg = c11.number_input("Peso total del lote (Kg, opcional)", min_value=0.0, value=0.0, step=100.0)
+
+    agregar = st.form_submit_button("➕ Agregar oferta")
+    if agregar:
+        if not comprador.strip() or precio_base <= 0:
+            st.warning("Completá al menos el nombre del comprador y el precio.")
+        else:
+            st.session_state["ofertas"].append(Oferta(
+                comprador=comprador.strip(),
+                precio_base=precio_base,
+                tipo_precio="gancho" if es_gancho else "en_pie",
+                rinde_pct=rinde_pct,
+                incluye_iva=incluye_iva,
+                iva_pct=iva_pct,
+                tiene_comision=tiene_comision,
+                comision_pct=comision_pct,
+                plazo_dias=plazo_dias,
+                tasa_mensual_pct=tasa_mensual_pct,
+                peso_total_kg=peso_total_kg,
+            ))
+            st.rerun()
+
+if st.session_state["ofertas"]:
+    resultados = sorted(
+        ((idx, normalizar_oferta(o)) for idx, o in enumerate(st.session_state["ofertas"])),
+        key=lambda par: par[1]["precio_final"], reverse=True,
+    )
+    for puesto, (idx, r) in enumerate(resultados):
+        with st.container(border=True):
+            c_info, c_precio, c_borrar = st.columns([3, 2, 1])
+            with c_info:
+                nombre = f"🏆 **{r['comprador']}**" if puesto == 0 else f"**{r['comprador']}**"
+                st.markdown(nombre)
+                detalle = f"${r['precio_base']:,.2f}/Kg" + (" en gancho" if r["tipo_precio"] == "gancho" else " en pie")
+                if r["plazo_dias"]:
+                    detalle += f" · {r['plazo_dias']} días de plazo"
+                else:
+                    detalle += " · contado"
+                st.caption(detalle)
+            with c_precio:
+                st.metric("Comparable ($/Kg en pie)", f"${r['precio_final']:,.2f}")
+                if r["monto_total"]:
+                    st.caption(f"Monto total est.: ${r['monto_total']:,.0f}")
+            with c_borrar:
+                if st.button("🗑️", key=f"del_oferta_{idx}"):
+                    st.session_state["ofertas"].pop(idx)
+                    st.rerun()
+            with st.expander("Ver cálculo"):
+                pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
+                if r["tipo_precio"] == "gancho":
+                    pasos.append(f"Equivalente en pie (× {r['rinde_pct']:.0f}% de rinde): ${r['precio_en_pie']:,.2f}/Kg")
+                pasos.append(f"Bruto con IVA: ${r['precio_bruto_iva']:,.2f}/Kg")
+                if r["comision_pct"]:
+                    pasos.append(f"Neto de comisión ({r['comision_pct']:.1f}%): ${r['precio_neto_comision']:,.2f}/Kg")
+                if r["plazo_dias"]:
+                    pasos.append(
+                        f"Ajustado a valor presente ({r['plazo_dias']} días @ {r['tasa_mensual_pct']:.1f}%/mes): "
+                        f"**${r['precio_final']:,.2f}/Kg**"
+                    )
+                for i, paso in enumerate(pasos, 1):
+                    st.write(f"{i}. {paso}")
+
+    if st.button("🗑️ Borrar todas las ofertas"):
+        st.session_state["ofertas"] = []
+        st.rerun()
+
+st.divider()
 
 tab_inv, tab_faena = st.tabs(["🐄 Invernada", "🥩 Faena"])
 
