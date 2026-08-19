@@ -147,6 +147,10 @@ def tarjeta_favorito(col, fila: pd.Series, signo: str, usar_usd: bool, decimales
             return
         st.metric(f"{signo}/{unidad}", f"{signo} {precio_val:,.{decimales}f}")
 
+        # Siempre se renderizan estas dos líneas (con un texto de reemplazo si
+        # la fuente no publica el dato) para que todas las tarjetas midan lo
+        # mismo — si no, MAG (sin variación semanal) queda más baja que el
+        # resto y las tarjetas se ven desparejas.
         delta = fila.get(variacion_col)
         precio_anterior = fila.get(precio_anterior_col)
         if pd.notna(delta):
@@ -156,13 +160,23 @@ def tarjeta_favorito(col, fila: pd.Series, signo: str, usar_usd: bool, decimales
             color = VERDE_SUBE if delta > 0 else (ROJO_BAJA if delta < 0 else GRIS_IGUAL)
             flecha = "▲" if delta > 0 else ("▼" if delta < 0 else "▬")
             st.markdown(f":{('green' if delta > 0 else 'red' if delta < 0 else 'gray')}[{flecha} {texto_delta}]")
+        else:
+            st.markdown(":gray[Sin variación disponible]")
+
         periodo = fila.get("periodo_comparacion")
+        fecha_dato = fila.get("fecha_dato")
         if pd.notna(periodo):
             st.caption(f"vs. semana del {periodo}")
+        elif pd.notna(fecha_dato):
+            st.caption(f"Remate del {fecha_dato.strftime('%d/%m/%Y')}")
+        else:
+            st.caption("")
 
         cantidad = fila.get("cantidad")
         if pd.notna(cantidad):
             st.caption(f"{int(cantidad):,} cabezas operadas")
+        else:
+            st.caption("")
 
 
 def grafico_barras(d: pd.DataFrame, precio_col: str, titulo_x: str, color_col: str = None, color_map: dict = None, decimales: int = 0):
