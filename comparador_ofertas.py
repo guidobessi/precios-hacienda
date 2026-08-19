@@ -29,10 +29,18 @@ class Oferta:
 def normalizar_oferta(o: Oferta) -> dict:
     precio_en_pie = o.precio_base * (o.rinde_pct / 100) if o.tipo_precio == "gancho" else o.precio_base
 
-    precio_bruto_iva = precio_en_pie if o.incluye_iva else precio_en_pie * (1 + o.iva_pct / 100)
+    # Se calculan siempre las dos bases (sin IVA y con IVA), sin importar
+    # cómo haya cotizado el comprador, para poder comparar ofertas que vienen
+    # en formatos distintos ("precio final" vs. "+ IVA") una al lado de la otra.
+    if o.incluye_iva:
+        precio_con_iva = precio_en_pie
+        precio_sin_iva = precio_en_pie / (1 + o.iva_pct / 100)
+    else:
+        precio_sin_iva = precio_en_pie
+        precio_con_iva = precio_en_pie * (1 + o.iva_pct / 100)
 
     comision = o.comision_pct if o.tiene_comision else 0.0
-    precio_neto_comision = precio_bruto_iva * (1 - comision / 100)
+    precio_neto_comision = precio_con_iva * (1 - comision / 100)
 
     meses = o.plazo_dias / 30
     factor_descuento = (1 + o.tasa_mensual_pct / 100) ** meses
@@ -44,7 +52,8 @@ def normalizar_oferta(o: Oferta) -> dict:
         "tipo_precio": o.tipo_precio,
         "rinde_pct": o.rinde_pct,
         "precio_en_pie": precio_en_pie,
-        "precio_bruto_iva": precio_bruto_iva,
+        "precio_sin_iva": precio_sin_iva,
+        "precio_con_iva": precio_con_iva,
         "comision_pct": comision,
         "precio_neto_comision": precio_neto_comision,
         "plazo_dias": o.plazo_dias,

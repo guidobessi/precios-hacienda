@@ -221,7 +221,7 @@ with col_ts:
     st.caption(f"Última consulta: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
 inv = _cargar(_invernada, "deCampoaCampo Invernada")
-can = _cargar(_faena_canuelas, "De Campo a Campo (Cañuelas)")
+can = _cargar(_faena_canuelas, "DCAC (Cañuelas)")
 mag = _cargar(_faena_mag, "MAG")
 
 catalogo = construir_catalogo(
@@ -281,43 +281,86 @@ st.caption(
 
 if "ofertas" not in st.session_state:
     st.session_state["ofertas"] = cargar_ofertas()
+if "editando_idx" not in st.session_state:
+    st.session_state["editando_idx"] = None
+
+editando_idx = st.session_state["editando_idx"]
+if editando_idx is not None and editando_idx >= len(st.session_state["ofertas"]):
+    editando_idx = st.session_state["editando_idx"] = None
+oferta_editar = st.session_state["ofertas"][editando_idx] if editando_idx is not None else None
+
+if oferta_editar:
+    st.info(f"✏️ Editando la oferta de **{oferta_editar.comprador}**.")
 
 with st.form("form_oferta", clear_on_submit=True):
     c1, c2 = st.columns(2)
-    comprador = c1.text_input("Comprador")
-    tipo_precio = c2.radio("Tipo de precio", ["Precio final (en pie)", "Precio en gancho (media res)"], horizontal=True)
+    comprador = c1.text_input("Comprador", value=oferta_editar.comprador if oferta_editar else "")
+    opciones_tipo = ["Precio final (en pie)", "Precio en gancho (media res)"]
+    tipo_precio = c2.radio(
+        "Tipo de precio", opciones_tipo, horizontal=True,
+        index=1 if oferta_editar and oferta_editar.tipo_precio == "gancho" else 0,
+    )
     es_gancho = tipo_precio.startswith("Precio en gancho")
 
     c3, c4 = st.columns(2)
-    precio_base = c3.number_input("Precio informado ($/Kg)", min_value=0.0, step=10.0, format="%.2f")
+    precio_base = c3.number_input(
+        "Precio informado ($/Kg)", min_value=0.0, step=10.0, format="%.2f",
+        value=float(oferta_editar.precio_base) if oferta_editar else 0.0,
+    )
     rinde_pct = c4.number_input(
-        "Rinde de la media res (%)", min_value=40.0, max_value=65.0, value=56.0, step=0.5,
+        "Rinde de la media res (%)", min_value=40.0, max_value=65.0, step=0.5,
+        value=float(oferta_editar.rinde_pct) if oferta_editar else 56.0,
         help="Sólo se usa si elegiste 'Precio en gancho' — convierte a $/Kg en pie.",
     )
 
     c5, c6 = st.columns(2)
-    incluye_iva = c5.radio("¿El precio ya incluye IVA?", ["No, hay que sumarlo", "Sí, ya incluido"], horizontal=True) == "Sí, ya incluido"
-    iva_pct = c6.number_input("IVA (%)", min_value=0.0, value=10.5, step=0.5, help="Sólo se usa si el precio no incluye IVA.")
+    opciones_iva = ["No, hay que sumarlo", "Sí, ya incluido"]
+    incluye_iva = c5.radio(
+        "¿El precio ya incluye IVA?", opciones_iva, horizontal=True,
+        index=1 if oferta_editar and oferta_editar.incluye_iva else 0,
+    ) == "Sí, ya incluido"
+    iva_pct = c6.number_input(
+        "IVA (%)", min_value=0.0, step=0.5, help="Sólo se usa si el precio no incluye IVA.",
+        value=float(oferta_editar.iva_pct) if oferta_editar else 10.5,
+    )
 
     c7, c8 = st.columns(2)
-    tiene_comision = c7.checkbox("Tiene comisión")
-    comision_pct = c8.number_input("Comisión (%)", min_value=0.0, value=3.0, step=0.5, help="Sólo se usa si tildaste 'Tiene comisión'.")
+    tiene_comision = c7.checkbox("Tiene comisión", value=oferta_editar.tiene_comision if oferta_editar else False)
+    comision_pct = c8.number_input(
+        "Comisión (%)", min_value=0.0, step=0.5, help="Sólo se usa si tildaste 'Tiene comisión'.",
+        value=float(oferta_editar.comision_pct) if oferta_editar else 3.0,
+    )
 
     c9, c10, c11 = st.columns(3)
-    plazo_dias = c9.number_input("Plazo de pago (días)", min_value=0, value=0, step=5)
+    plazo_dias = c9.number_input(
+        "Plazo de pago (días)", min_value=0, step=5,
+        value=int(oferta_editar.plazo_dias) if oferta_editar else 0,
+    )
     tasa_mensual_pct = c10.number_input(
-        "Tasa mensual esperada (%)", min_value=0.0, value=3.0, step=0.5,
+        "Tasa mensual esperada (%)", min_value=0.0, step=0.5,
+        value=float(oferta_editar.tasa_mensual_pct) if oferta_editar else 3.0,
         help="Costo de oportunidad / inflación mensual que asumís. Se usa para descontar a valor "
              "presente las ofertas con plazo de pago mayor a contado — no afecta si el plazo es 0.",
     )
-    peso_total_kg = c11.number_input("Peso total del lote (Kg, opcional)", min_value=0.0, value=0.0, step=100.0)
+    peso_total_kg = c11.number_input(
+        "Peso total del lote (Kg, opcional)", min_value=0.0, step=100.0,
+        value=float(oferta_editar.peso_total_kg) if oferta_editar else 0.0,
+    )
 
-    agregar = st.form_submit_button("➕ Agregar oferta")
+    c_guardar, c_cancelar = st.columns([1, 1])
+    texto_boton = "💾 Guardar cambios" if oferta_editar else "➕ Agregar oferta"
+    agregar = c_guardar.form_submit_button(texto_boton, use_container_width=True)
+    cancelar = c_cancelar.form_submit_button("✖️ Cancelar edición", use_container_width=True, disabled=not oferta_editar)
+
+    if cancelar:
+        st.session_state["editando_idx"] = None
+        st.rerun()
+
     if agregar:
         if not comprador.strip() or precio_base <= 0:
             st.warning("Completá al menos el nombre del comprador y el precio.")
         else:
-            st.session_state["ofertas"].append(Oferta(
+            nueva_oferta = Oferta(
                 comprador=comprador.strip(),
                 precio_base=precio_base,
                 tipo_precio="gancho" if es_gancho else "en_pie",
@@ -329,7 +372,12 @@ with st.form("form_oferta", clear_on_submit=True):
                 plazo_dias=plazo_dias,
                 tasa_mensual_pct=tasa_mensual_pct,
                 peso_total_kg=peso_total_kg,
-            ))
+            )
+            if editando_idx is not None:
+                st.session_state["ofertas"][editando_idx] = nueva_oferta
+                st.session_state["editando_idx"] = None
+            else:
+                st.session_state["ofertas"].append(nueva_oferta)
             guardar_ofertas(st.session_state["ofertas"])
             st.rerun()
 
@@ -340,7 +388,7 @@ if st.session_state["ofertas"]:
     )
     for puesto, (idx, r) in enumerate(resultados):
         with st.container(border=True, key=f"offercard_{idx}"):
-            c_info, c_precio, c_borrar = st.columns([3, 2, 1])
+            c_info, c_precio, c_acciones = st.columns([3, 2, 1])
             with c_info:
                 nombre = f"🏆 **{r['comprador']}**" if puesto == 0 else f"**{r['comprador']}**"
                 st.markdown(nombre)
@@ -350,20 +398,27 @@ if st.session_state["ofertas"]:
                 else:
                     detalle += " · contado"
                 st.caption(detalle)
+                st.caption(f"Sin IVA: ${r['precio_sin_iva']:,.2f}/Kg  ·  Con IVA: ${r['precio_con_iva']:,.2f}/Kg")
             with c_precio:
                 st.metric("Comparable ($/Kg en pie)", f"${r['precio_final']:,.2f}")
                 if r["monto_total"]:
                     st.caption(f"Monto total est.: ${r['monto_total']:,.0f}")
-            with c_borrar:
-                if st.button("🗑️", key=f"del_oferta_{idx}"):
+            with c_acciones:
+                c_edit, c_del = st.columns(2)
+                if c_edit.button("✏️", key=f"edit_oferta_{idx}", help="Editar esta oferta"):
+                    st.session_state["editando_idx"] = idx
+                    st.rerun()
+                if c_del.button("🗑️", key=f"del_oferta_{idx}", help="Borrar esta oferta"):
                     st.session_state["ofertas"].pop(idx)
+                    if st.session_state["editando_idx"] == idx:
+                        st.session_state["editando_idx"] = None
                     guardar_ofertas(st.session_state["ofertas"])
                     st.rerun()
             with st.expander("Ver cálculo"):
                 pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
                 if r["tipo_precio"] == "gancho":
                     pasos.append(f"Equivalente en pie (× {r['rinde_pct']:.0f}% de rinde): ${r['precio_en_pie']:,.2f}/Kg")
-                pasos.append(f"Bruto con IVA: ${r['precio_bruto_iva']:,.2f}/Kg")
+                pasos.append(f"Sin IVA: ${r['precio_sin_iva']:,.2f}/Kg  ·  Con IVA: ${r['precio_con_iva']:,.2f}/Kg")
                 if r["comision_pct"]:
                     pasos.append(f"Neto de comisión ({r['comision_pct']:.1f}%): ${r['precio_neto_comision']:,.2f}/Kg")
                 if r["plazo_dias"]:
@@ -415,7 +470,7 @@ with tab_inv:
 # ─── Faena ─────────────────────────────────────────────────────────────────
 
 with tab_faena:
-    st.subheader("De Campo a Campo")
+    st.subheader("DCAC")
     st.caption("Cañuelas — ex Mercado de Liniers")
     if can.empty:
         st.info("Sin datos de Cañuelas disponibles.")

@@ -19,8 +19,18 @@ def test_precio_final_simple_sin_ajustes():
 def test_suma_iva_cuando_no_esta_incluido():
     o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=False, iva_pct=10.5)
     r = normalizar_oferta(o)
-    assert round(r["precio_bruto_iva"], 2) == round(5000 * 1.105, 2)
+    assert r["precio_sin_iva"] == 5000
+    assert round(r["precio_con_iva"], 2) == round(5000 * 1.105, 2)
     assert round(r["precio_final"], 2) == round(5000 * 1.105, 2)
+
+
+def test_desglosa_sin_iva_cuando_ya_esta_incluido():
+    # Si ya viene con IVA, "sin IVA" se calcula al revés (dividiendo), no
+    # queda igual al precio con IVA.
+    o = Oferta(comprador="A", precio_base=5525, tipo_precio="en_pie", incluye_iva=True, iva_pct=10.5)
+    r = normalizar_oferta(o)
+    assert r["precio_con_iva"] == 5525
+    assert round(r["precio_sin_iva"], 2) == round(5525 / 1.105, 2)
 
 
 def test_descuenta_comision():
