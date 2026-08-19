@@ -16,6 +16,16 @@ def test_precio_final_simple_sin_ajustes():
     assert r["precio_final"] == 5000
 
 
+def test_lote_tiene_default_y_viaja_en_el_resultado():
+    o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=True)
+    assert o.lote == "General"
+    r = normalizar_oferta(o)
+    assert r["lote"] == "General"
+
+    o2 = Oferta(comprador="B", precio_base=5000, tipo_precio="en_pie", incluye_iva=True, lote="Novillos 400kg")
+    assert normalizar_oferta(o2)["lote"] == "Novillos 400kg"
+
+
 def test_suma_iva_cuando_no_esta_incluido():
     o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=False, iva_pct=10.5)
     r = normalizar_oferta(o)

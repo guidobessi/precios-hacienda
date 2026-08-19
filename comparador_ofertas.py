@@ -16,6 +16,7 @@ class Oferta:
     comprador: str
     precio_base: float
     tipo_precio: str  # "en_pie" | "gancho"
+    lote: str = "General"  # agrupa ofertas que compiten entre sí (mismo lote de venta)
     rinde_pct: float = 56.0  # sólo aplica si tipo_precio == "gancho"
     incluye_iva: bool = False
     iva_pct: float = 10.5
@@ -58,6 +59,7 @@ def normalizar_oferta(o: Oferta) -> dict:
 
     return {
         "comprador": o.comprador,
+        "lote": o.lote,
         "precio_base": o.precio_base,
         "tipo_precio": o.tipo_precio,
         "rinde_pct": o.rinde_pct,

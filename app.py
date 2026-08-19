@@ -311,6 +311,26 @@ oferta_editar = st.session_state["ofertas"][editando_idx] if editando_idx is not
 if oferta_editar:
     st.info(f"✏️ Editando la oferta de **{oferta_editar.comprador}**.")
 
+# El selector de lote va FUERA del form: adentro de un st.form los widgets no
+# reaccionan hasta el submit, y acá necesitamos que aparezca el campo de texto
+# apenas se elige "Nuevo lote" — así que este selectbox se resuelve antes.
+lotes_existentes = sorted({o.lote for o in st.session_state["ofertas"] if o.lote})
+NUEVO_LOTE = "➕ Nuevo lote..."
+opciones_lote = [NUEVO_LOTE] + lotes_existentes
+lote_sel = st.selectbox(
+    "📦 Lote de venta",
+    opciones_lote,
+    key="lote_selector",
+    help="Agrupá las ofertas por lote — cada lote se compara aparte, no se mezclan categorías distintas.",
+)
+if lote_sel == NUEVO_LOTE:
+    lote_nombre = st.text_input(
+        "Nombre del lote nuevo", key="lote_nuevo_nombre",
+        placeholder="ej. Novillos 400kg - Corral 3",
+    ).strip()
+else:
+    lote_nombre = lote_sel
+
 with st.form("form_oferta", clear_on_submit=True):
     c1, c2 = st.columns(2)
     comprador = c1.text_input("Comprador", value=oferta_editar.comprador if oferta_editar else "")
@@ -390,11 +410,14 @@ with st.form("form_oferta", clear_on_submit=True):
     if agregar:
         if not comprador.strip() or precio_base <= 0:
             st.warning("Completá al menos el nombre del comprador y el precio.")
+        elif not lote_nombre:
+            st.warning("Elegí o escribí un lote de venta para esta oferta.")
         else:
             nueva_oferta = Oferta(
                 comprador=comprador.strip(),
                 precio_base=precio_base,
                 tipo_precio="gancho" if es_gancho else "en_pie",
+                lote=lote_nombre,
                 rinde_pct=rinde_pct,
                 incluye_iva=incluye_iva,
                 iva_pct=iva_pct,
@@ -414,68 +437,102 @@ with st.form("form_oferta", clear_on_submit=True):
             guardar_ofertas(st.session_state["ofertas"])
             st.rerun()
 
+def _iniciar_edicion(idx: int):
+    # Debe ir en un on_click: mutar el session_state de un widget con key
+    # (acá, "lote_selector") después de que ya se instanció en esta misma
+    # corrida del script está prohibido por Streamlit — el callback corre
+    # antes de que el script vuelva a renderizar los widgets.
+    st.session_state["editando_idx"] = idx
+    oferta_target = st.session_state["ofertas"][idx]
+    lotes_actuales = sorted({o.lote for o in st.session_state["ofertas"] if o.lote})
+    if oferta_target.lote in lotes_actuales:
+        st.session_state["lote_selector"] = oferta_target.lote
+    else:
+        st.session_state["lote_selector"] = NUEVO_LOTE
+        st.session_state["lote_nuevo_nombre"] = oferta_target.lote
+
+
 if st.session_state["ofertas"]:
-    resultados = sorted(
-        ((idx, normalizar_oferta(o)) for idx, o in enumerate(st.session_state["ofertas"])),
-        key=lambda par: par[1]["precio_final"], reverse=True,
-    )
-    for puesto, (idx, r) in enumerate(resultados):
-        with st.container(border=True, key=f"offercard_{idx}"):
-            c_nombre, c_acciones = st.columns([5, 1])
-            with c_nombre:
-                nombre = f"🏆 **{r['comprador']}**" if puesto == 0 else f"**{r['comprador']}**"
-                st.markdown(nombre)
-                detalle = f"${r['precio_base']:,.2f}/Kg" + (" en gancho" if r["tipo_precio"] == "gancho" else " en pie")
-                if r["plazo_dias"]:
-                    detalle += f" · {r['plazo_dias']} días de plazo"
-                else:
-                    detalle += " · contado"
-                if r["achique_pct"]:
-                    detalle += f" · {r['achique_pct']:.0f}% en negro"
-                st.caption(detalle)
-            with c_acciones:
-                c_edit, c_del = st.columns(2)
-                if c_edit.button("✏️", key=f"edit_oferta_{idx}", help="Editar esta oferta"):
-                    st.session_state["editando_idx"] = idx
-                    st.rerun()
-                if c_del.button("🗑️", key=f"del_oferta_{idx}", help="Borrar esta oferta"):
-                    st.session_state["ofertas"].pop(idx)
-                    if st.session_state["editando_idx"] == idx:
-                        st.session_state["editando_idx"] = None
-                    guardar_ofertas(st.session_state["ofertas"])
-                    st.rerun()
+    indices_por_lote = {}
+    for idx, o in enumerate(st.session_state["ofertas"]):
+        indices_por_lote.setdefault(o.lote or "General", []).append(idx)
 
-            c_siniva, c_coniva, c_final = st.columns(3)
-            c_siniva.metric("Sin IVA", f"${r['precio_sin_iva']:,.2f}")
-            c_coniva.metric("Con IVA", f"${r['precio_con_iva']:,.2f}")
-            c_final.metric("🎯 Comparable (ajustado)", f"${r['precio_final']:,.2f}")
-            if r["monto_total"]:
-                st.caption(f"Monto total estimado: ${r['monto_total']:,.0f}")
-
-            with st.expander("Ver cálculo"):
-                pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
-                if r["tipo_precio"] == "gancho":
-                    pasos.append(f"Equivalente en pie (× {r['rinde_pct']:.0f}% de rinde): ${r['precio_en_pie']:,.2f}/Kg")
-                pasos.append(f"Sin IVA: ${r['precio_sin_iva']:,.2f}/Kg  ·  Con IVA: ${r['precio_con_iva']:,.2f}/Kg")
-                if r["achique_pct"]:
-                    pasos.append(
-                        f"Con achique ({r['achique_pct']:.0f}% en negro, sin IVA en esa parte): "
-                        f"${r['precio_con_achique']:,.2f}/Kg"
+    for nombre_lote, indices_lote in indices_por_lote.items():
+        st.markdown(f"#### 📦 {nombre_lote}")
+        resultados = sorted(
+            ((idx, normalizar_oferta(st.session_state["ofertas"][idx])) for idx in indices_lote),
+            key=lambda par: par[1]["precio_final"], reverse=True,
+        )
+        for puesto, (idx, r) in enumerate(resultados):
+            with st.container(border=True, key=f"offercard_{idx}"):
+                c_nombre, c_acciones = st.columns([5, 1])
+                with c_nombre:
+                    nombre = f"🏆 **{r['comprador']}**" if puesto == 0 else f"**{r['comprador']}**"
+                    st.markdown(nombre)
+                    detalle = f"${r['precio_base']:,.2f}/Kg" + (" en gancho" if r["tipo_precio"] == "gancho" else " en pie")
+                    if r["plazo_dias"]:
+                        detalle += f" · {r['plazo_dias']} días de plazo"
+                    else:
+                        detalle += " · contado"
+                    if r["achique_pct"]:
+                        detalle += f" · {r['achique_pct']:.0f}% en negro"
+                    st.caption(detalle)
+                with c_acciones:
+                    c_edit, c_del = st.columns(2)
+                    c_edit.button(
+                        "✏️", key=f"edit_oferta_{idx}", help="Editar esta oferta",
+                        on_click=_iniciar_edicion, args=(idx,),
                     )
-                if r["comision_pct"]:
-                    pasos.append(f"Neto de comisión ({r['comision_pct']:.1f}%): ${r['precio_neto_comision']:,.2f}/Kg")
-                if r["plazo_dias"]:
-                    pasos.append(
-                        f"Ajustado a valor presente ({r['plazo_dias']} días @ {r['tasa_mensual_pct']:.1f}%/mes): "
-                        f"**${r['precio_final']:,.2f}/Kg**"
-                    )
-                for i, paso in enumerate(pasos, 1):
-                    st.write(f"{i}. {paso}")
+                    if c_del.button("🗑️", key=f"del_oferta_{idx}", help="Borrar esta oferta"):
+                        st.session_state["ofertas"].pop(idx)
+                        if st.session_state["editando_idx"] == idx:
+                            st.session_state["editando_idx"] = None
+                        guardar_ofertas(st.session_state["ofertas"])
+                        st.rerun()
 
-    if st.button("🗑️ Borrar todas las ofertas"):
-        st.session_state["ofertas"] = []
-        guardar_ofertas([])
-        st.rerun()
+                c_siniva, c_coniva, c_final = st.columns(3)
+                c_siniva.metric("Sin IVA", f"${r['precio_sin_iva']:,.2f}")
+                c_coniva.metric("Con IVA", f"${r['precio_con_iva']:,.2f}")
+                c_final.metric("🎯 Comparable (ajustado)", f"${r['precio_final']:,.2f}")
+                if r["monto_total"]:
+                    st.caption(f"Monto total estimado: ${r['monto_total']:,.0f}")
+
+                with st.expander("Ver cálculo"):
+                    pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
+                    if r["tipo_precio"] == "gancho":
+                        pasos.append(f"Equivalente en pie (× {r['rinde_pct']:.0f}% de rinde): ${r['precio_en_pie']:,.2f}/Kg")
+                    pasos.append(f"Sin IVA: ${r['precio_sin_iva']:,.2f}/Kg  ·  Con IVA: ${r['precio_con_iva']:,.2f}/Kg")
+                    if r["achique_pct"]:
+                        pasos.append(
+                            f"Con achique ({r['achique_pct']:.0f}% en negro, sin IVA en esa parte): "
+                            f"${r['precio_con_achique']:,.2f}/Kg"
+                        )
+                    if r["comision_pct"]:
+                        pasos.append(f"Neto de comisión ({r['comision_pct']:.1f}%): ${r['precio_neto_comision']:,.2f}/Kg")
+                    if r["plazo_dias"]:
+                        pasos.append(
+                            f"Ajustado a valor presente ({r['plazo_dias']} días @ {r['tasa_mensual_pct']:.1f}%/mes): "
+                            f"**${r['precio_final']:,.2f}/Kg**"
+                        )
+                    for i, paso in enumerate(pasos, 1):
+                        st.write(f"{i}. {paso}")
+
+        if st.button(f"🗑️ Borrar ofertas de {nombre_lote}", key=f"del_lote_{nombre_lote}"):
+            st.session_state["ofertas"] = [
+                o for i, o in enumerate(st.session_state["ofertas"]) if i not in indices_lote
+            ]
+            if st.session_state["editando_idx"] in indices_lote:
+                st.session_state["editando_idx"] = None
+            guardar_ofertas(st.session_state["ofertas"])
+            st.rerun()
+        st.divider()
+
+    with st.expander("⚠️ Borrar TODAS las ofertas de TODOS los lotes"):
+        if st.button("🗑️ Confirmar: borrar todo"):
+            st.session_state["ofertas"] = []
+            st.session_state["editando_idx"] = None
+            guardar_ofertas([])
+            st.rerun()
 
 st.divider()
 
