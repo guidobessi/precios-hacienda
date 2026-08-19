@@ -8,6 +8,7 @@ import streamlit as st
 from precios_hacienda import fetch_invernada, fetch_faena_canuelas, fetch_faena_mag
 from comparador_ofertas import Oferta, normalizar_oferta
 from ofertas_store import cargar_ofertas, guardar_ofertas
+from favoritos_store import cargar_favoritos, guardar_favoritos
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -221,18 +222,17 @@ with col_ts:
     st.caption(f"Última consulta: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
 inv = _cargar(_invernada, "deCampoaCampo Invernada")
-can = _cargar(_faena_canuelas, "DCAC (Cañuelas)")
+can = _cargar(_faena_canuelas, "DCAC")
 mag = _cargar(_faena_mag, "MAG")
 
 catalogo = construir_catalogo(
-    (inv, "Invernada"), (can, "Faena Cañuelas"), (mag, "Faena MAG"),
+    (inv, "Invernada"), (can, "Faena DCAC"), (mag, "Faena MAG"),
 )
 
 FAVORITOS_DEFAULT = [
     "Terneros 160-180 Kg. · Invernada",
-    "Novillitos hasta 390 Kg. · Faena Cañuelas",
-    "Vaquillonas hasta 390 Kg. · Faena Cañuelas",
-    "Vacas Buenas · Faena Cañuelas",
+    "NOVILLITOS Esp. h 390 · Faena MAG",
+    "VAQUILLONAS Esp. h 390 · Faena MAG",
 ]
 
 # ─── Filtros (sidebar) ──────────────────────────────────────────────────────
@@ -240,11 +240,16 @@ FAVORITOS_DEFAULT = [
 with st.sidebar:
     st.header("⭐ Tus categorías")
     opciones_favoritos = sorted(catalogo["clave"].unique()) if not catalogo.empty else []
+    favoritos_guardados = cargar_favoritos()
+    if favoritos_guardados is None:
+        favoritos_guardados = FAVORITOS_DEFAULT
     favoritos_sel = st.multiselect(
         "Elegí las que querés ver siempre arriba de todo",
         opciones_favoritos,
-        default=[f for f in FAVORITOS_DEFAULT if f in opciones_favoritos],
+        default=[f for f in favoritos_guardados if f in opciones_favoritos],
     )
+    if favoritos_sel != favoritos_guardados:
+        guardar_favoritos(favoritos_sel)
     st.divider()
     st.header("🔍 Explorar todo")
     moneda = st.radio("Moneda", ["Pesos ($)", "Dólares (US$)"], index=0)
@@ -476,7 +481,7 @@ with tab_faena:
     st.subheader("DCAC")
     st.caption("Cañuelas — ex Mercado de Liniers")
     if can.empty:
-        st.info("Sin datos de Cañuelas disponibles.")
+        st.info("Sin datos de DCAC disponibles.")
     else:
         precio_col = "precio_usd" if usar_usd else "precio"
         d = filtrar_y_ordenar(can, precio_col, col_variacion)
