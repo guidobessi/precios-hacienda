@@ -21,6 +21,8 @@ class Oferta:
     iva_pct: float = 10.5
     tiene_comision: bool = False
     comision_pct: float = 0.0
+    tiene_achique: bool = False
+    achique_pct: float = 0.0  # % de la operación que se cobra en negro (sin factura, sin IVA)
     plazo_dias: int = 0
     tasa_mensual_pct: float = 3.0
     peso_total_kg: float = 0.0
@@ -39,8 +41,16 @@ def normalizar_oferta(o: Oferta) -> dict:
         precio_sin_iva = precio_en_pie
         precio_con_iva = precio_en_pie * (1 + o.iva_pct / 100)
 
+    # Achique: la parte que se cobra en negro no lleva IVA (misma lógica que
+    # pct_facturado/pct_negro en La Uno Agro) — sólo la porción facturada
+    # recibe el recargo de IVA, la porción en negro se suma tal cual.
+    achique = o.achique_pct if o.tiene_achique else 0.0
+    pct_facturado = 1 - achique / 100
+    pct_negro = achique / 100
+    precio_con_achique = precio_con_iva * pct_facturado + precio_sin_iva * pct_negro
+
     comision = o.comision_pct if o.tiene_comision else 0.0
-    precio_neto_comision = precio_con_iva * (1 - comision / 100)
+    precio_neto_comision = precio_con_achique * (1 - comision / 100)
 
     meses = o.plazo_dias / 30
     factor_descuento = (1 + o.tasa_mensual_pct / 100) ** meses
@@ -54,6 +64,8 @@ def normalizar_oferta(o: Oferta) -> dict:
         "precio_en_pie": precio_en_pie,
         "precio_sin_iva": precio_sin_iva,
         "precio_con_iva": precio_con_iva,
+        "achique_pct": achique,
+        "precio_con_achique": precio_con_achique,
         "comision_pct": comision,
         "precio_neto_comision": precio_neto_comision,
         "plazo_dias": o.plazo_dias,

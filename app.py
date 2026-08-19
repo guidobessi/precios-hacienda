@@ -350,6 +350,18 @@ with st.form("form_oferta", clear_on_submit=True):
         value=float(oferta_editar.comision_pct) if oferta_editar else 3.0,
     )
 
+    c7b, c8b = st.columns(2)
+    tiene_achique = c7b.checkbox(
+        "Tiene achique (parte en negro)", value=oferta_editar.tiene_achique if oferta_editar else False,
+        help="Parte de la operación que se cobra sin factura y sin IVA.",
+    )
+    achique_pct = c8b.number_input(
+        "Achique / en negro (%)", min_value=0.0, max_value=100.0, step=5.0,
+        value=float(oferta_editar.achique_pct) if oferta_editar else 20.0,
+        help="Sólo se usa si tildaste 'Tiene achique'. Esa porción no lleva IVA — "
+             "reduce el comparable respecto de tener todo facturado.",
+    )
+
     c9, c10, c11 = st.columns(3)
     plazo_dias = c9.number_input(
         "Plazo de pago (días)", min_value=0, step=5,
@@ -388,6 +400,8 @@ with st.form("form_oferta", clear_on_submit=True):
                 iva_pct=iva_pct,
                 tiene_comision=tiene_comision,
                 comision_pct=comision_pct,
+                tiene_achique=tiene_achique,
+                achique_pct=achique_pct,
                 plazo_dias=plazo_dias,
                 tasa_mensual_pct=tasa_mensual_pct,
                 peso_total_kg=peso_total_kg,
@@ -416,6 +430,8 @@ if st.session_state["ofertas"]:
                     detalle += f" · {r['plazo_dias']} días de plazo"
                 else:
                     detalle += " · contado"
+                if r["achique_pct"]:
+                    detalle += f" · {r['achique_pct']:.0f}% en negro"
                 st.caption(detalle)
             with c_acciones:
                 c_edit, c_del = st.columns(2)
@@ -441,6 +457,11 @@ if st.session_state["ofertas"]:
                 if r["tipo_precio"] == "gancho":
                     pasos.append(f"Equivalente en pie (× {r['rinde_pct']:.0f}% de rinde): ${r['precio_en_pie']:,.2f}/Kg")
                 pasos.append(f"Sin IVA: ${r['precio_sin_iva']:,.2f}/Kg  ·  Con IVA: ${r['precio_con_iva']:,.2f}/Kg")
+                if r["achique_pct"]:
+                    pasos.append(
+                        f"Con achique ({r['achique_pct']:.0f}% en negro, sin IVA en esa parte): "
+                        f"${r['precio_con_achique']:,.2f}/Kg"
+                    )
                 if r["comision_pct"]:
                     pasos.append(f"Neto de comisión ({r['comision_pct']:.1f}%): ${r['precio_neto_comision']:,.2f}/Kg")
                 if r["plazo_dias"]:

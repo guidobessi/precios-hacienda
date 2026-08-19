@@ -94,3 +94,45 @@ def test_monto_total_none_si_no_hay_peso():
     o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=True)
     r = normalizar_oferta(o)
     assert r["monto_total"] is None
+
+
+def test_achique_ignorado_si_flag_apagado():
+    o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=False, iva_pct=10.5,
+               tiene_achique=False, achique_pct=50)
+    r = normalizar_oferta(o)
+    assert round(r["precio_final"], 2) == round(5000 * 1.105, 2)
+
+
+def test_achique_no_lleva_iva_en_la_parte_negra():
+    # 5000 sin IVA -> con IVA = 5525. Con 20% de achique: 80% factura con
+    # IVA (5525*0.8) + 20% en negro sin IVA (5000*0.2).
+    o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=False, iva_pct=10.5,
+               tiene_achique=True, achique_pct=20)
+    r = normalizar_oferta(o)
+    esperado = (5000 * 1.105) * 0.8 + 5000 * 0.2
+    assert round(r["precio_con_achique"], 4) == round(esperado, 4)
+    assert round(r["precio_final"], 4) == round(esperado, 4)
+    # El achique siempre da un número menor al "todo facturado", porque esa
+    # porción se queda sin el recargo de IVA.
+    assert r["precio_con_achique"] < r["precio_con_iva"]
+
+
+def test_achique_100_por_ciento_equivale_a_precio_sin_iva():
+    o = Oferta(comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=False, iva_pct=10.5,
+               tiene_achique=True, achique_pct=100)
+    r = normalizar_oferta(o)
+    assert round(r["precio_con_achique"], 4) == round(r["precio_sin_iva"], 4)
+
+
+def test_achique_se_combina_con_comision_y_plazo():
+    o = Oferta(
+        comprador="A", precio_base=5000, tipo_precio="en_pie", incluye_iva=False, iva_pct=10.5,
+        tiene_achique=True, achique_pct=30, tiene_comision=True, comision_pct=3,
+        plazo_dias=30, tasa_mensual_pct=3, peso_total_kg=1000,
+    )
+    r = normalizar_oferta(o)
+    con_achique = (5000 * 1.105) * 0.7 + 5000 * 0.3
+    neto_comision = con_achique * 0.97
+    esperado_final = neto_comision / 1.03
+    assert round(r["precio_final"], 4) == round(esperado_final, 4)
+    assert round(r["monto_total"], 2) == round(esperado_final * 1000, 2)
