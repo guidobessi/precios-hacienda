@@ -388,8 +388,8 @@ if st.session_state["ofertas"]:
     )
     for puesto, (idx, r) in enumerate(resultados):
         with st.container(border=True, key=f"offercard_{idx}"):
-            c_info, c_precio, c_acciones = st.columns([3, 2, 1])
-            with c_info:
+            c_nombre, c_acciones = st.columns([5, 1])
+            with c_nombre:
                 nombre = f"🏆 **{r['comprador']}**" if puesto == 0 else f"**{r['comprador']}**"
                 st.markdown(nombre)
                 detalle = f"${r['precio_base']:,.2f}/Kg" + (" en gancho" if r["tipo_precio"] == "gancho" else " en pie")
@@ -398,11 +398,6 @@ if st.session_state["ofertas"]:
                 else:
                     detalle += " · contado"
                 st.caption(detalle)
-                st.caption(f"Sin IVA: ${r['precio_sin_iva']:,.2f}/Kg  ·  Con IVA: ${r['precio_con_iva']:,.2f}/Kg")
-            with c_precio:
-                st.metric("Comparable ($/Kg en pie)", f"${r['precio_final']:,.2f}")
-                if r["monto_total"]:
-                    st.caption(f"Monto total est.: ${r['monto_total']:,.0f}")
             with c_acciones:
                 c_edit, c_del = st.columns(2)
                 if c_edit.button("✏️", key=f"edit_oferta_{idx}", help="Editar esta oferta"):
@@ -414,6 +409,14 @@ if st.session_state["ofertas"]:
                         st.session_state["editando_idx"] = None
                     guardar_ofertas(st.session_state["ofertas"])
                     st.rerun()
+
+            c_siniva, c_coniva, c_final = st.columns(3)
+            c_siniva.metric("Sin IVA", f"${r['precio_sin_iva']:,.2f}")
+            c_coniva.metric("Con IVA", f"${r['precio_con_iva']:,.2f}")
+            c_final.metric("🎯 Comparable (ajustado)", f"${r['precio_final']:,.2f}")
+            if r["monto_total"]:
+                st.caption(f"Monto total estimado: ${r['monto_total']:,.0f}")
+
             with st.expander("Ver cálculo"):
                 pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
                 if r["tipo_precio"] == "gancho":
