@@ -7,6 +7,7 @@ import streamlit as st
 
 from precios_hacienda import fetch_invernada, fetch_faena_canuelas, fetch_faena_mag
 from comparador_ofertas import Oferta, normalizar_oferta
+from ofertas_store import cargar_ofertas, guardar_ofertas
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -18,21 +19,41 @@ ROJO_BAJA = "#C1443C"
 GRIS_IGUAL = "#9AA39B"
 COLOR_TENDENCIA = {"Sube": VERDE_SUBE, "Baja": ROJO_BAJA, "Estable": GRIS_IGUAL, "Sin dato": GRIS_IGUAL}
 
+COLOR_FONDO_INVERNADA = "#E3F3FB"  # celeste pastel
+BORDE_FONDO_INVERNADA = "#BFE2F2"
+COLOR_FONDO_FAENA = "#E4E8FB"  # azul pastel
+BORDE_FONDO_FAENA = "#C4CDF5"
+
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     [data-testid="stMetric"] { text-align: center; }
     [data-testid="stMetricLabel"] { justify-content: center; }
     [data-testid="stMetricDelta"] { justify-content: center; }
+
+    .app-title {
+        text-align: center; text-transform: uppercase; letter-spacing: 2px;
+        font-weight: 800; margin-bottom: 0.1rem;
+    }
+    .app-subtitle { text-align: center; color: #5B6B62; margin-bottom: 1rem; }
+
+    div[data-testid="stVerticalBlock"][class*="st-key-"] {
+        border-radius: 14px !important;
+        box-shadow: 0 2px 10px rgba(30, 60, 40, 0.08);
+    }
+    h2, h3 { letter-spacing: 0.3px; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("🐄 Precios de Mercado de Hacienda")
-st.caption("Invernada y Faena — deCampoaCampo (Invernada + Cañuelas) y Mercado Agroganadero.")
+st.markdown('<h1 class="app-title">🐄 Precios de Mercado de Hacienda</h1>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="app-subtitle">Invernada y Faena — deCampoaCampo (Invernada + Cañuelas) y MAG.</p>',
+    unsafe_allow_html=True,
+)
 
 
 # ─── Carga de datos ─────────────────────────────────────────────────────────
@@ -47,7 +68,7 @@ def _faena_canuelas() -> pd.DataFrame:
     return pd.DataFrame(fetch_faena_canuelas())
 
 
-@st.cache_data(ttl=1800, show_spinner="Consultando Mercado Agroganadero...")
+@st.cache_data(ttl=1800, show_spinner="Consultando MAG...")
 def _faena_mag() -> pd.DataFrame:
     return pd.DataFrame(fetch_faena_mag())
 
@@ -100,14 +121,24 @@ def construir_catalogo(*fuentes_con_label) -> pd.DataFrame:
     return cat
 
 
-def tarjeta_favorito(col, fila: pd.Series, signo: str, usar_usd: bool, decimales: int):
+def tarjeta_favorito(col, fila: pd.Series, signo: str, usar_usd: bool, decimales: int, key: str):
     precio_col = "precio_usd" if usar_usd else "precio"
     precio_anterior_col = "precio_anterior_usd" if usar_usd else "precio_anterior"
     variacion_col = "variacion_usd" if usar_usd else "variacion"
     precio_val = fila.get(precio_col)
     unidad = fila.get("unidad")
     unidad = unidad if pd.notna(unidad) else "Kg"
-    with col, st.container(border=True):
+
+    if fila.get("tipo") == "invernada":
+        color_fondo, color_borde = COLOR_FONDO_INVERNADA, BORDE_FONDO_INVERNADA
+    else:
+        color_fondo, color_borde = COLOR_FONDO_FAENA, BORDE_FONDO_FAENA
+    col.markdown(
+        f"<style>.st-key-{key} {{ background-color: {color_fondo}; border-color: {color_borde} !important; }}</style>",
+        unsafe_allow_html=True,
+    )
+
+    with col, st.container(border=True, key=key):
         st.caption(fila["fuente_label"])
         st.markdown(f"**{fila['categoria']}**")
         if pd.isna(precio_val):
@@ -190,11 +221,11 @@ with col_ts:
     st.caption(f"Última consulta: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
 inv = _cargar(_invernada, "deCampoaCampo Invernada")
-can = _cargar(_faena_canuelas, "deCampoaCampo Cañuelas")
-mag = _cargar(_faena_mag, "Mercado Agroganadero")
+can = _cargar(_faena_canuelas, "De Campo a Campo (Cañuelas)")
+mag = _cargar(_faena_mag, "MAG")
 
 catalogo = construir_catalogo(
-    (inv, "Invernada"), (can, "Faena Cañuelas"), (mag, "Faena Mercado Agroganadero"),
+    (inv, "Invernada"), (can, "Faena Cañuelas"), (mag, "Faena MAG"),
 )
 
 FAVORITOS_DEFAULT = [
@@ -233,9 +264,9 @@ col_variacion = "variacion_usd" if usar_usd else "variacion"
 if favoritos_sel:
     st.subheader("🎯 Tus precios")
     cols = st.columns(len(favoritos_sel))
-    for col, clave in zip(cols, favoritos_sel):
+    for idx, (col, clave) in enumerate(zip(cols, favoritos_sel)):
         fila = catalogo[catalogo["clave"] == clave].iloc[0]
-        tarjeta_favorito(col, fila, signo, usar_usd, decimales)
+        tarjeta_favorito(col, fila, signo, usar_usd, decimales, key=f"favcard_{idx}")
     st.divider()
 
 # ─── Comparador de ofertas ──────────────────────────────────────────────────
@@ -244,11 +275,12 @@ st.subheader("🧮 Comparador de ofertas")
 st.caption(
     "Cargá las ofertas de cada comprador, aunque vengan en formatos distintos "
     "(precio final o en gancho, con o sin IVA, con o sin comisión, a distinto plazo de pago) "
-    "y te decimos cuál conviene aceptar en igualdad de condiciones."
+    "y te decimos cuál conviene aceptar en igualdad de condiciones. "
+    "Quedan guardadas aunque recargues la página — las borrás vos cuando quieras."
 )
 
 if "ofertas" not in st.session_state:
-    st.session_state["ofertas"] = []
+    st.session_state["ofertas"] = cargar_ofertas()
 
 with st.form("form_oferta", clear_on_submit=True):
     c1, c2 = st.columns(2)
@@ -298,6 +330,7 @@ with st.form("form_oferta", clear_on_submit=True):
                 tasa_mensual_pct=tasa_mensual_pct,
                 peso_total_kg=peso_total_kg,
             ))
+            guardar_ofertas(st.session_state["ofertas"])
             st.rerun()
 
 if st.session_state["ofertas"]:
@@ -306,7 +339,7 @@ if st.session_state["ofertas"]:
         key=lambda par: par[1]["precio_final"], reverse=True,
     )
     for puesto, (idx, r) in enumerate(resultados):
-        with st.container(border=True):
+        with st.container(border=True, key=f"offercard_{idx}"):
             c_info, c_precio, c_borrar = st.columns([3, 2, 1])
             with c_info:
                 nombre = f"🏆 **{r['comprador']}**" if puesto == 0 else f"**{r['comprador']}**"
@@ -324,6 +357,7 @@ if st.session_state["ofertas"]:
             with c_borrar:
                 if st.button("🗑️", key=f"del_oferta_{idx}"):
                     st.session_state["ofertas"].pop(idx)
+                    guardar_ofertas(st.session_state["ofertas"])
                     st.rerun()
             with st.expander("Ver cálculo"):
                 pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
@@ -342,6 +376,7 @@ if st.session_state["ofertas"]:
 
     if st.button("🗑️ Borrar todas las ofertas"):
         st.session_state["ofertas"] = []
+        guardar_ofertas([])
         st.rerun()
 
 st.divider()
@@ -380,7 +415,8 @@ with tab_inv:
 # ─── Faena ─────────────────────────────────────────────────────────────────
 
 with tab_faena:
-    st.subheader("Cañuelas (ex Mercado de Liniers)")
+    st.subheader("De Campo a Campo")
+    st.caption("Cañuelas — ex Mercado de Liniers")
     if can.empty:
         st.info("Sin datos de Cañuelas disponibles.")
     else:
@@ -396,9 +432,10 @@ with tab_faena:
             }
             tabla_estilizada(d, cols, var_col_original=col_variacion, precio_col_original=precio_col, decimales=decimales)
 
-    st.subheader("Mercado Agroganadero")
+    st.subheader("MAG")
+    st.caption("Mercado Agroganadero")
     if mag.empty:
-        st.info("Sin datos de Mercado Agroganadero disponibles.")
+        st.info("Sin datos de MAG disponibles.")
     else:
         d = mag.copy()
         if busqueda:
@@ -407,11 +444,11 @@ with tab_faena:
         sort_col = {"Precio": "precio", "Variación": "precio", "Cantidad operada": "cantidad"}[orden_por]
         d = d.sort_values(sort_col, ascending=not orden_desc)
 
-        grafico_barras(d, "precio", "Precio promedio ($/Kg + IVA)", color_col="Grupo")
+        grafico_barras(d, "precio", "Precio máximo ($/Kg + IVA)", color_col="Grupo")
         with st.expander("Ver tabla completa"):
             cols = {
                 "categoria": "Categoría", "precio_min": "Mínimo", "precio_max": "Máximo",
-                "precio": "Promedio", "cantidad": "Cabezas",
+                "precio_promedio": "Promedio", "cantidad": "Cabezas",
             }
             tabla_estilizada(d, cols)
         if not d.empty:

@@ -148,16 +148,18 @@ def _parse_mag_html(html_text: str) -> list[dict]:
         if not categoria or categoria.startswith("-"):
             continue
         try:
+            precio_max = _num_ar(tds[2].text_content())
             rows.append({
                 "fuente": "mag_faena",
                 "tipo": "faena",
                 "grupo": None,
                 "categoria": categoria,
-                "precio": _num_ar(tds[3].text_content()),  # promedio
+                "precio": precio_max,  # el precio "principal" de esta fuente es el máximo, no el promedio
                 "precio_usd": None,
                 "precio_anterior": None,
                 "precio_min": _num_ar(tds[1].text_content()),
-                "precio_max": _num_ar(tds[2].text_content()),
+                "precio_max": precio_max,
+                "precio_promedio": _num_ar(tds[3].text_content()),
                 "variacion": None,
                 "cantidad": int(_num_ar(tds[5].text_content())),
                 "fecha_dato": fecha_dato,

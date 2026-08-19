@@ -119,6 +119,7 @@ def test_parse_mag_html():
     assert r0["categoria"] == "NOVILLOS Esp.Joven + 430"
     assert r0["precio_min"] == 3200.0
     assert r0["precio_max"] == 4700.0
-    assert r0["precio"] == 4461.294
+    assert r0["precio"] == 4700.0  # el precio "principal" de MAG es el máximo, no el promedio
+    assert r0["precio_promedio"] == 4461.294
     assert r0["cantidad"] == 478
     assert r0["fecha_dato"] == date(2026, 8, 18)
