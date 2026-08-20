@@ -257,13 +257,18 @@ with st.sidebar:
     favoritos_guardados = cargar_favoritos()
     if favoritos_guardados is None:
         favoritos_guardados = FAVORITOS_DEFAULT
+    favoritos_disponibles_hoy = [f for f in favoritos_guardados if f in opciones_favoritos]
     favoritos_sel = st.multiselect(
         "Elegí las que querés ver siempre arriba de todo",
         opciones_favoritos,
-        default=[f for f in favoritos_guardados if f in opciones_favoritos],
+        default=favoritos_disponibles_hoy,
     )
-    if favoritos_sel != favoritos_guardados:
-        guardar_favoritos(favoritos_sel)
+    if favoritos_sel != favoritos_disponibles_hoy:
+        # Si alguna favorita guardada no está en las opciones de hoy (ej. MAG
+        # sin remate todavía), no la tratamos como "el usuario la sacó" — la
+        # re-agregamos para no perderla apenas la fuente vuelva a publicarla.
+        ausentes_hoy = [f for f in favoritos_guardados if f not in opciones_favoritos]
+        guardar_favoritos(favoritos_sel + ausentes_hoy)
     st.divider()
     st.header("🔍 Explorar todo")
     moneda = st.radio("Moneda", ["Pesos ($)", "Dólares (US$)"], index=0)
@@ -284,7 +289,18 @@ if favoritos_sel:
     st.subheader("🎯 Tus precios")
     cols = st.columns(len(favoritos_sel))
     for idx, (col, clave) in enumerate(zip(cols, favoritos_sel)):
-        fila = catalogo[catalogo["clave"] == clave].iloc[0]
+        sel = catalogo[catalogo["clave"] == clave] if not catalogo.empty else catalogo
+        if sel.empty:
+            # La fuente de esta categoría no publicó nada en este refresco
+            # (ej. MAG sin remate todavía) — se muestra un aviso en vez de
+            # romper la página con un índice fuera de rango.
+            categoria_txt, _, fuente_txt = clave.partition(" · ")
+            with col, st.container(border=True, key=f"favcard_{idx}"):
+                st.caption(fuente_txt or "—")
+                st.markdown(f"**{categoria_txt}**")
+                st.write("Sin dato hoy — la fuente todavía no publicó esta categoría.")
+            continue
+        fila = sel.iloc[0]
         tarjeta_favorito(col, fila, signo, usar_usd, decimales, key=f"favcard_{idx}")
     st.divider()
 
@@ -590,7 +606,11 @@ with tab_faena:
     st.subheader("MAG")
     st.caption("Mercado Agroganadero")
     if mag.empty:
-        st.info("Sin datos de MAG disponibles.")
+        st.info(
+            "MAG todavía no publicó precios por categoría hoy — puede ser que el remate "
+            "no haya terminado o que no haya habido operaciones. Probá de nuevo más tarde "
+            "o tocá **Actualizar ahora**."
+        )
     else:
         d = mag.copy()
         if busqueda:
