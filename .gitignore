@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 data/ofertas.json
 data/favoritos.json
+data/lotes.json

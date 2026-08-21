@@ -9,6 +9,7 @@ from precios_hacienda import fetch_invernada, fetch_faena_canuelas, fetch_faena_
 from comparador_ofertas import Oferta, normalizar_oferta
 from ofertas_store import cargar_ofertas, guardar_ofertas
 from favoritos_store import cargar_favoritos, guardar_favoritos
+from lotes_store import cargar_referencias_lote, guardar_referencia_lote
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ COLOR_FONDO_INVERNADA = "#E3F3FB"  # celeste pastel
 BORDE_FONDO_INVERNADA = "#BFE2F2"
 COLOR_FONDO_FAENA = "#E4E8FB"  # azul pastel
 BORDE_FONDO_FAENA = "#C4CDF5"
+
+DESCUENTO_FERIA = 0.05  # costo aprox. de vender/enviar directo a la feria
 
 st.markdown(
     """
@@ -145,7 +148,18 @@ def tarjeta_favorito(col, fila: pd.Series, signo: str, usar_usd: bool, decimales
         if pd.isna(precio_val):
             st.write(f"Sin dato en {signo}" if usar_usd else "Sin dato")
             return
-        st.metric(f"{signo}/{unidad}", f"{signo} {precio_val:,.{decimales}f}")
+        precio_neto = precio_val * (1 - DESCUENTO_FERIA)
+        st.caption(f"{signo}/{unidad}")
+        st.markdown(
+            f'<div style="display:flex; align-items:baseline; gap:0.6rem; flex-wrap:wrap;">'
+            f'<span style="font-size:1.05rem; color:#8a9490; text-decoration:line-through;">'
+            f'{signo} {precio_val:,.{decimales}f}</span>'
+            f'<span style="font-size:1.9rem; font-weight:700; line-height:1.1;">'
+            f'{signo} {precio_neto:,.{decimales}f}</span>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Neto de venta directa (−{DESCUENTO_FERIA:.0%})")
 
         # Siempre se renderizan estas dos líneas (con un texto de reemplazo si
         # la fuente no publica el dato) para que todas las tarjetas midan lo
@@ -473,8 +487,25 @@ if st.session_state["ofertas"]:
     for idx, o in enumerate(st.session_state["ofertas"]):
         indices_por_lote.setdefault(o.lote or "General", []).append(idx)
 
+    referencias_lote = cargar_referencias_lote()
+
     for nombre_lote, indices_lote in indices_por_lote.items():
         st.markdown(f"#### 📦 {nombre_lote}")
+
+        with st.expander("🎯 Precio de referencia (venta directa a feria)"):
+            ref_actual = referencias_lote.get(nombre_lote, 0.0)
+            ref_nueva = st.number_input(
+                "Precio neto de venta directa ($/Kg)", min_value=0.0, step=10.0,
+                value=float(ref_actual), key=f"ref_lote_{nombre_lote}",
+                help="Copiá el precio 'neto de venta directa' de la tarjeta favorita que "
+                     "corresponda a este lote. Cada oferta te va a mostrar si te conviene "
+                     "más o menos que vender directo. Dejalo en 0 para no comparar.",
+            )
+            if ref_nueva != ref_actual:
+                guardar_referencia_lote(nombre_lote, ref_nueva if ref_nueva > 0 else None)
+                referencias_lote = cargar_referencias_lote()
+        referencia = referencias_lote.get(nombre_lote, 0.0)
+
         resultados = sorted(
             ((idx, normalizar_oferta(st.session_state["ofertas"][idx])) for idx in indices_lote),
             key=lambda par: par[1]["precio_final"], reverse=True,
@@ -512,6 +543,14 @@ if st.session_state["ofertas"]:
                 c_final.metric("🎯 Comparable (ajustado)", f"${r['precio_final']:,.2f}")
                 if r["monto_total"]:
                     st.caption(f"Monto total estimado: ${r['monto_total']:,.0f}")
+                if referencia:
+                    diferencia = r["precio_final"] - referencia
+                    color = "green" if diferencia > 0 else ("red" if diferencia < 0 else "gray")
+                    veredicto = "mejor" if diferencia > 0 else ("peor" if diferencia < 0 else "igual")
+                    st.markdown(
+                        f":{color}[vs. venta directa (${referencia:,.2f}): "
+                        f"{diferencia:+,.2f} — {veredicto} que vender en la feria]"
+                    )
 
                 with st.expander("Ver cálculo"):
                     pasos = [f"Precio informado: ${r['precio_base']:,.2f}/Kg"]
